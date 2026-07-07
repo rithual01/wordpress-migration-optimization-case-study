@@ -36,3 +36,53 @@ El proyecto requería migrar de forma integral el portal web institucional desde
 * **Gestión de Caché Estática en Divi:** Se detectó que Divi compilaba archivos CSS estáticos avanzados de forma rígida. Se forzó el vaciado técnico y la regeneración de archivos CSS estáticos y cachés del servidor mediante comandos CLI:
   ```bash
   php wp-cli.phar cache flush --allow-root
+
+---
+
+## 💻 Documentación Técnica y Bitácora de Comandos (Technical Playbook)
+
+Para replicar o auditar los procedimientos de este caso de estudio, se detallan a continuación las configuraciones de infraestructura, comandos CLI y consultas estructuradas ejecutadas en producción:
+
+### 1. Optimización de Límites en el Servidor (MariaDB Core)
+Para evitar interrupciones o bloqueos por desbordamiento de búfer al procesar el volcado SQL con más de una década de historial, se modificó la configuración global del motor de base de datos en `/etc/mysql/mariadb.conf.d/50-server.cnf` (o equivalente en HestiaCP):
+
+```ini
+[mysqld]
+max_allowed_packet = 256M
+net_buffer_length = 100K
+
+2. Sanitización de la Base de Datos y Automatización vía WP-CLI
+La corrección de URLs persistentes remanentes del entorno local (http://localhost...) y la re-serialización de objetos complejos dentro de las tablas nativas se automatizó por terminal SSH con los siguientes comandos:
+
+# Cambiar de forma segura las referencias de dominio manteniendo la integridad de los datos
+php wp-cli.phar search-replace "http://vri-local-url" "[https://vri.uni.edu.pe](https://vri.uni.edu.pe)" --all-tables --allow-root
+
+# Corregir bugs de comillas curvas/tipográficas generadas en constructores visuales dentro de Shortcodes
+php wp-cli.phar search-replace "id=»" "id=\"" --all-tables --allow-root
+php wp-cli.phar search-replace "»]" "\"]" --all-tables --allow-root
+
+# Forzar el vaciado del búfer interno y transitorios de WordPress
+php wp-cli.phar cache flush --allow-root
+
+3. Solución SQL al Conflicto de Retrocompatibilidad (Ingeniería de Datos)
+Dado que la versión del plugin Pro instalada realizaba peticiones rígidas a la estructura estructural clásica (wp_dalt_...), se descartó la migración hacia las tablas modernas (wp_daextletal_...). Se procedió a purgar las tablas vacías recién generadas e inyectar el esquema nativo idéntico al entorno LocalWP:
+
+-- Paso A: Eliminación de la estructura moderna incompatible
+DROP TABLE IF EXISTS wp_daextletal_cell;
+DROP TABLE IF EXISTS wp_daextletal_data;
+DROP TABLE IF EXISTS wp_daextletal_table;
+
+-- Paso B: Importación del esquema clásico con persistencia de IDs correlativos
+-- (Se ejecutó mediante el archivo .sql exportado de LocalWP con estructura nativa)
+CREATE TABLE wp_dalt_table (...);
+CREATE TABLE wp_dalt_data (...);
+CREATE TABLE wp_dalt_cell (...);
+
+4. Configuración del Servidor Web para Recursos Estáticos (Nginx)
+Para solucionar problemas de renderizado del logotipo y cabeceras en entornos móviles bajo el proxy inverso de Nginx, se estandarizaron los nombres de archivos eliminando espacios en blanco y caracteres especiales, forzando la regeneración del archivo CSS estático desde el panel de Divi (Opciones del tema > Avanzado > Builder > Static CSS File Generation > Clear) y aplicando las directivas de expiración correctas:
+
+location ~* \.(js|css|png|jpg|jpeg|gif|ico|webp)$ {
+    expires max;
+    log_not_found off;
+    access_log off;
+}
